@@ -1,15 +1,14 @@
 import dotenv from "dotenv";
 import { Twilio } from "twilio";
 import { ConversationInstance } from "twilio/lib/rest/conversations/v1/conversation";
+import { MessageInstance } from "twilio/lib/rest/conversations/v1/conversation/message";
 import { ParticipantInstance } from "twilio/lib/rest/conversations/v1/conversation/participant";
 import {
-  addSMSParticipantToConversation,
-  createConversation,
-  listConversations,
-  listConversationParticipants,
   siccParticipants,
-  sendCryptoAlert,
-} from "./twilio/twilio";
+  listConversations,
+  createConversation,
+  listConversationParticipants,
+} from "../twilio/twilio";
 
 const debug = false;
 
@@ -29,8 +28,15 @@ const messari_api_key: string = process.env.MESSARI_API_KEY as string;
 
 // conversation name we are looking for -- will be created if not found
 const friendly_name = "Sicc Crypto Alerts";
-const unique_name = "Sicc Crypto Alerts";
 
+/**
+ * CHXXX...: use the Conversation SID you just copied
+ * <Your Personal Mobile Number>: your own mobile number, in E.164 format
+ * <Your Purchased Twilio Phone Number>: the Twilio number you purchased in step 1, in E.164 format
+ * ACXXX...: Your Twilio Account SID
+ * your_auth_token: Your Twilio Auth Token
+ * MBXXX...: Participant SID
+ */
 if (require.main === module) {
   if (
     accountSid &&
@@ -64,18 +70,11 @@ if (require.main === module) {
           ++i
         ) {
           if (conversations[i].friendlyName === friendly_name) {
-            console.log(conversations[i]);
+            debug ? console.log(conversations[i]) : null;
             return conversations[i];
           }
         }
-
-        // create a conversation with specified friendly_name if not found and return newly created conversation object
-        return createConversation(client, friendly_name, unique_name).then(
-          (conversation: void | ConversationInstance) => {
-            // console.log((conversation as ConversationInstance).sid);
-            return conversation as ConversationInstance;
-          }
-        );
+        return null;
       })
       .then((conversation) => {
         if (!conversation) {
@@ -86,61 +85,37 @@ if (require.main === module) {
         const conversationSID: string | undefined = conversation?.sid as string;
 
         // list all participants in the conversation SID
-        return listConversationParticipants(client, conversationSID)
-          .then((participants) => {
-            const phoneNumbers: Array<string> = participantsNumbers.split(",");
+        return listConversationParticipants(client, conversationSID).then(
+          (participants) => {
+            if (!participants) {
+              throw new Error("Participtants object is null");
+            }
 
             // list out current participtants in conversations SID
             console.log("Current conversation participants:");
-            const conversationParticipantNumbers = new Array<string>();
-            for (
-              let i = 0;
-              i < (participants as Array<ParticipantInstance>).length;
-              ++i
-            ) {
-              const phoneNumber = participants[i].messagingBinding?.address;
+            if (participants.length > 0) {
+              for (
+                let i = 0;
+                i < (participants as Array<ParticipantInstance>).length;
+                ++i
+              ) {
+                const phoneNumber =
+                  participants[i].messagingBinding?.address ??
+                  participants[i].messagingBinding?.projected_address;
 
-              conversationParticipantNumbers.push(phoneNumber);
-              console.log(
-                phoneNumber,
-                "=>",
-                siccPartipantsMap.get(phoneNumber) ?? participants[i].identity
-              );
-            }
-
-            // check if participantsNumbers env var is in current participtants in conversations SID
-            // if not, add them to the current conversations SID
-            const promises = new Array<Promise<any>>();
-            for (let i = 0; i < phoneNumbers.length; ++i) {
-              if (!conversationParticipantNumbers.includes(phoneNumbers[i])) {
-                promises.push(
-                  addSMSParticipantToConversation(
-                    client,
-                    conversationSID,
-                    phoneNumbers[i],
-                    twilioNumber
-                  )
-                    .then((participant: ParticipantInstance | void) => {
-                      console.log(
-                        `Sucessfully added participant ${
-                          (participant as ParticipantInstance).messagingBinding
-                            ?.address
-                        } to SID ${conversationSID}`
-                      );
-                    })
-                    .catch((err) => {
-                      console.error(err);
-                      process.exit(1);
-                    })
+                console.log(
+                  phoneNumber,
+                  "=>",
+                  siccPartipantsMap.get(phoneNumber) ??
+                    participants[i].identity ??
+                    phoneNumber
                 );
               }
+            } else {
+              console.log(`No participants in conversation ${conversationSID}`);
             }
-            return Promise.all(promises);
-          })
-          .then((_: Array<any>) => {
-            console.log("Participant list updated.");
-            return sendCryptoAlert(client, messari_api_key, conversationSID);
-          });
+          }
+        );
       })
       .catch((err) => {
         console.error(err);
